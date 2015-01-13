@@ -960,39 +960,39 @@ define(function (require, exports, module) {
 		if (!document.querySelector('#response')) {
 			return null;
 		}
-		
+
 		// If there isn't a media query, show the message that a query has not been selected
 		if (!QueryManager.getCurrentQueryMark()) {
 			hostEditor.displayErrorMessageAtCursor("There have not been any media queries defined.");
 			return $.Deferred().promise();
 		}
-		
+
 		// We are now going to write the string the temporary CSS file so we can display
 		// it in the inline editor. A jQuery deffered object is used for async.
 		var result = new $.Deferred();
-		
+
 		// get code mirror from main editor
 		var cm = EditorManager.getCurrentFullEditor()._codeMirror;
         var cursor = cm.getCursor();
-        
+
         // Find out the tag name they were on when they hit Cmd-E. If could not
         // be determined then return so message is displayed to user
         var tag = cm.getTokenAt(cursor).state.htmlState.tagName;
         if (tag ===  null) {
             return null;
         }
-        
+
         // Get a reference to the DOM element in the iframe.
 		var domCache = DomCache.getCache();
         var el = domCache.frameDom[tag][domCache.codeDom[tag].indexOf(cursor.line)];
-		
+
 		// Set this element to the inlineElement property that is used elsewhere.
 		inlineElement = el;
 
 		// Call my utility method that finds all of the CSS rules that are
 		// currently set for this element. See the comments in ResponseUtils.js.
 		cssResults = ResponseUtils.getAuthorCSSRules(frameDOM, el);
-		
+
 		var count = 4,
 			i,
 			len,
@@ -1006,10 +1006,10 @@ define(function (require, exports, module) {
 		// Create a new inline editor. This is my stripped-down version of the
 		// MultiRangeInlineEditor module.
 		var inlineEditor = new ResponseInlineEdit();
-		inlineEditor.editorNode = el;
+		inlineEditor.cursor = cursor;
 
 		// Load the editor with the CSS we generated.
-		inlineEditor.load(hostEditor, 0, count + 2, editorContents.contents);
+		inlineEditor.load(hostEditor, 0, editorContents.numLines, editorContents.contents);
 
 		// Called when the editor is added to the DOM.
 		inlineEditor.onAdded = function () {
@@ -1083,53 +1083,56 @@ define(function (require, exports, module) {
 		// Go through all of the returned CSS rules and write to the output string.
 		if (res.rules[currentSelector] !== null) {
 			for (prop in res.rules[currentSelector]) {
+				if (res.rules[currentSelector].hasOwnProperty(prop)) {
+					var pvalue = null;
+					lineNumber++;
 
-				var pvalue = null;
-				lineNumber++;
+					// Here we loop through all of the defined media queries to see if this rule
+					// has already been set by one of them. This is used to show inheritance.
+					var queries = QueryManager.getSortedQueryMarks();
+					for (index in queries) {
+						if (queries.hasOwnProperty(index)) {
 
-				// Here we loop through all of the defined media queries to see if this rule
-				// has already been set by one of them. This is used to show inheritance.
-				var queries = QueryManager.getSortedQueryMarks();
-				for (index in queries) {
+							var q = queries[index];
 
-					var q = queries[index];
+							// If the media query (q) has a width greater than the currently selected
+							// query and has already set a value for this property, then the current
+							// query will inherit that value.
+							if (q !== cq && parseInt(q.width, 10) > parseInt(cq.width, 10) &&
+									q.selectors[currentSelector]) {
 
-					// If the media query (q) has a width greater than the currently selected
-					// query and has already set a value for this property, then the current
-					// query will inherit that value.
-					if (q !== cq && parseInt(q.width, 10) > parseInt(cq.width, 10) &&
-							q.selectors[currentSelector]) {
+								// Check if it has the property set and if so, add it to the existingEdits
+								// array so we can highlight it appropriately. Also stores the value.
+								if (q.selectors[currentSelector].rules[prop]) {
+									pvalue = q.selectors[currentSelector].rules[prop];
+									existingEdits.push({query: q, line: lineNumber});
+									pvalue = pvalue.replace(/;/, '');
+									break;
+								}
 
-						// Check if it has the property set and if so, add it to the existingEdits
-						// array so we can highlight it appropriately. Also stores the value.
-						if (q.selectors[currentSelector].rules[prop]) {
-							pvalue = q.selectors[currentSelector].rules[prop];
-							existingEdits.push({query: q, line: lineNumber});
-							pvalue = pvalue.replace(/;/, '');
-							break;
-						}
+							} else if (cq === q && q.selectors[currentSelector]) {
+								// Check if the currently selected query has this property already set.
+								// If so then we add it to the existingEdits array for highlighting purposes.
+								// It also stores the value 'pvalue' so we can use that in the output.
 
-					} else if (cq === q && q.selectors[currentSelector]) {
-						// Check if the currently selected query has this property already set.
-						// If so then we add it to the existingEdits array for highlighting purposes.
-						// It also stores the value 'pvalue' so we can use that in the output.
-
-						if (q.selectors[currentSelector].rules[prop]) {
-							pvalue = q.selectors[currentSelector].rules[prop];
-							existingEdits.push({query: q, line: lineNumber});
-							pvalue = pvalue.replace(/;/, '');
-							break;
+								if (q.selectors[currentSelector].rules[prop]) {
+									pvalue = q.selectors[currentSelector].rules[prop];
+									existingEdits.push({query: q, line: lineNumber});
+									pvalue = pvalue.replace(/;/, '');
+									break;
+								}
+							}
 						}
 					}
-				}
 
-				// If this property hasn't been set by anyone, we use the original value returned.
-				if (!pvalue) {
-					pvalue = res.rules[currentSelector][prop];
-				}
+					// If this property hasn't been set by anyone, we use the original value returned.
+					if (!pvalue) {
+						pvalue = res.rules[currentSelector][prop];
+					}
 
-				// Finally we add the CSS rule to the output string.
-				str += "\t" + prop + ": " + pvalue.trim() + ";\n";
+					// Finally we add the CSS rule to the output string.
+					str += "\t" + prop + ": " + pvalue.trim() + ";\n";
+				}
 			}
 		} else {
 			// no rules so create an empty line
@@ -1139,7 +1142,7 @@ define(function (require, exports, module) {
 		// Closing curly brace = we're done!
 		str += "}";
 		
-		return { contents: str, existingEdits: existingEdits, numLines: lineNumber };
+		return { contents: str, existingEdits: existingEdits, numLines: lineNumber + 2 };
 	}
 	
 	/** 
@@ -1194,24 +1197,41 @@ define(function (require, exports, module) {
 		}
 
 		var cq = QueryManager.getCurrentQueryMark(),
+			cm = EditorManager.getCurrentFullEditor()._codeMirror,
 			i,
 			j,
 			len;
 
 		for (j = 0; j < inlineWidgets.length; j++) {
 
-			var inlineCodeMirror = inlineWidgets[j].editor._codeMirror;
+			var inlineWidget = inlineWidgets[j],
+				inlineCodeMirror = inlineWidget.editor._codeMirror,
+				cursor = inlineWidget.cursor;
 
+			// make sure cursor is updated 
+			cursor.line = inlineWidget.info.line.lineNo()
+			
 			// update the background colour of the inline mark
-			inlineWidgets[j].refreshMediaQueryInfo(cq);
+			inlineWidget.refreshMediaQueryInfo(cq);
 			
 			var existingEdits = [];
 
-/* BR: issue74 - stop using cached editorNode dom element as it is not longer valid if user reloads the iframe for any reason */
+/* BR: issue73 - stop using cached editorNode dom element as it is not longer valid if user reloads the iframe for any reason */
+
+			// Find out the tag name they were on when they hit Cmd-E. If could not
+			// be determined then return so message is displayed to user
+			var tag = cm.getTokenAt(cursor).state.htmlState.tagName;
+			if (tag ===  null) {
+				return null;
+			}
+
+			// Get a reference to the DOM element in the iframe.
+			var domCache = DomCache.getCache();
+			var el = domCache.frameDom[tag][domCache.codeDom[tag].indexOf(cursor.line)];
 
 			// Refresh rules for current query and loop through.
-			cssResults = ResponseUtils.getAuthorCSSRules(frameDOM, inlineWidgets[j].editorNode);
-			inlineWidgets[j].refreshSelectorDropdown(cssResults);
+			cssResults = ResponseUtils.getAuthorCSSRules(frameDOM, el);
+			inlineWidget.refreshSelectorDropdown(cssResults);
 
 			// Build the editor contents.
 			// Note: For some reason count is 0 when refreshed but 4 when editor is created
