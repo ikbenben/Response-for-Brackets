@@ -1012,6 +1012,13 @@ define(function (require, exports, module) {
 		// Load the editor with the CSS we generated.
 		inlineEditor.load(hostEditor, 0, editorContents.numLines, editorContents.contents);
 
+		// set handler for when bookmark is deleted from editing. we want to close the inline editor
+		// in this scenario
+		editorContext.bookmark.on('hide', function(e) {
+			console.log('bookmark has been deleted', e);
+			inlineEditor.close();
+		});
+		
 		// Called when the editor is added to the DOM.
 		inlineEditor.onAdded = function () {
 
@@ -1217,7 +1224,7 @@ define(function (require, exports, module) {
 			// due to user deleting the line. close the editor in this case
 			// as a fallback
 			if (!cursor) {
-				
+				inlineWidget.close();
 				break;
 			}
 			
@@ -1231,6 +1238,7 @@ define(function (require, exports, module) {
 			// can still be found
 			var tagInfo = HTMLUtils.getTagInfo(hostEditor, cursor);
 			if (!tagInfo.tagName) {
+				inlineWidget.close();
 				break;
 			}
 

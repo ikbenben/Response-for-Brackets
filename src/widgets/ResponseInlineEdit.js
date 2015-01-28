@@ -103,7 +103,12 @@ define(function (require, exports, module) {
 	// Function that sizes the inline editor based on the size of its contents
 	ResponseInlineEdit.prototype.sizeInlineWidgetToContents = function () {
 		ResponseInlineEdit.prototype.parentClass.sizeInlineWidgetToContents.call(this, true);
-		this.hostEditor.setInlineWidgetHeight(this, this.$editorHolder.height() + this.$header.height(), false);
+		
+		// not sure why we need to do this. 
+		var newHeight = this.$editorHolder.height() + this.$header.height();
+		if (newHeight) {
+			this.hostEditor.setInlineWidgetHeight(this, newHeight, false);
+		}
 	};
 	
 	// This refreshes the contents of the editor and also resizes it
