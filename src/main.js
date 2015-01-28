@@ -915,34 +915,37 @@ define(function (require, exports, module) {
 		}
 	}
 
+	/**
+	 * returns information about the currently selected html dom element
+	 */
+	function getEditorContext(hostEditor, pos) {
+
+		var pos = hostEditor.getCursorPos();
+		
+		// get the tag name for the current position. If not able to get it, then assume cursor
+		// is not in a valid position
+		var tagInfo = HTMLUtils.getTagInfo(hostEditor, pos);
+		if (!tagInfo.tagName) {
+			return null;
+		}
+
+		// set a bookmark so that if the user updates the html above or before the cursor
+		// position, the bookmark will be updated with the new position of the element. used
+		// to refresh the editor
+		var bookmark = hostEditor._codeMirror.setBookmark(pos);
+
+		return {
+			tagInfo: tagInfo,
+			bookmark: bookmark
+		}
+	}
+
 	/** 
 	 *  This is where we setup and display the inline editor for doing quick edits.
 	 *  @params: these 2 get sent when you register as an inline provider. The first
 	 *  is the main or host editor and the second is the cursor position.
 	 */
 	function inlineEditorProvider(hostEditor, pos) {
-
-		// uses the tagInfo from the editor to create adom element in the frame document
-		// that needs to be parsed for editing. we don't look up the element as we need
-		// more control in what is not included when getting the css rules associated to the
-		// element
-		function _getFrameElement(frameDom, tagInfo) {
-
-			var element = frameDom.createElement(tagInfo.tagName);
-
-			if (tagInfo.position.tokenType === HTMLUtils.ATTR_NAME || tagInfo.position.tokenType === HTMLUtils.ATTR_VALUE) {
-				if (tagInfo.attr.name === "class") {
-					// Class selector
-					element.className = tagInfo.attr.value.trim();
-
-				} else if (tagInfo.attr.name === "id") {
-					// ID selector
-					element.id = tagInfo.attr.value.trim();
-				}
-			}
-
-			return element;
-		}
 
 		// Only provide a CSS editor when cursor is in HTML content
 		if (hostEditor.getLanguageForSelection().getId() !== "html") {
@@ -971,20 +974,18 @@ define(function (require, exports, module) {
 		// it in the inline editor. A jQuery deffered object is used for async.
 		var result = new $.Deferred();
 
-		// get code mirror from main editor
-		var cm = EditorManager.getCurrentFullEditor()._codeMirror;
-        var cursor = cm.getCursor();
+		// get the editor context and if unable to get details, then return 
+		// null so inline editor is not opened
+		var editorContext = getEditorContext(hostEditor, pos);
+		if (!editorContext) {
+			return null;
+		}
 
-        // Find out the tag name they were on when they hit Cmd-E. If could not
-        // be determined then return so message is displayed to user
-        var tag = cm.getTokenAt(cursor).state.htmlState.tagName;
-        if (tag ===  null) {
-            return null;
-        }
+		var tag = editorContext.tagInfo.tagName;
 
         // Get a reference to the DOM element in the iframe.
 		var domCache = DomCache.getCache();
-        var el = domCache.frameDom[tag][domCache.codeDom[tag].indexOf(cursor.line)];
+        var el = domCache.frameDom[tag][domCache.codeDom[tag].indexOf(pos.line)];
 
 		// Set this element to the inlineElement property that is used elsewhere.
 		inlineElement = el;
@@ -1006,7 +1007,7 @@ define(function (require, exports, module) {
 		// Create a new inline editor. This is my stripped-down version of the
 		// MultiRangeInlineEditor module.
 		var inlineEditor = new ResponseInlineEdit();
-		inlineEditor.cursor = cursor;
+		inlineEditor.context = editorContext;
 
 		// Load the editor with the CSS we generated.
 		inlineEditor.load(hostEditor, 0, editorContents.numLines, editorContents.contents);
@@ -1045,6 +1046,10 @@ define(function (require, exports, module) {
 
 			// Call parent function first.
 			ResponseInlineEdit.prototype.parentClass.onAdded.apply(this, arguments);
+			
+			// delete the bookmark associated to this inline editor so they don't accrue
+			this.context.bookmark.clear();
+			this.context = null;
 		};
 
 		// I had to mod the EditorManager module so it always chooses me.
@@ -1206,25 +1211,31 @@ define(function (require, exports, module) {
 
 			var inlineWidget = inlineWidgets[j],
 				inlineCodeMirror = inlineWidget.editor._codeMirror,
-				cursor = inlineWidget.cursor;
-
-			// make sure cursor is updated 
-			cursor.line = inlineWidget.info.line.lineNo()
+				cursor = inlineWidget.context.bookmark.find();
+			
+			// the bookmark has been deleted for some reason, most likely
+			// due to user deleting the line. close the editor in this case
+			// as a fallback
+			if (!cursor) {
+				
+				break;
+			}
 			
 			// update the background colour of the inline mark
 			inlineWidget.refreshMediaQueryInfo(cq);
 			
 			var existingEdits = [];
 
-/* BR: issue73 - stop using cached editorNode dom element as it is not longer valid if user reloads the iframe for any reason */
-
 			// Find out the tag name they were on when they hit Cmd-E. If could not
-			// be determined then return so message is displayed to user
-			var tag = cm.getTokenAt(cursor).state.htmlState.tagName;
-			if (tag ===  null) {
-				return null;
+			// be determined then close the editor. this should never happen if bookmark
+			// can still be found
+			var tagInfo = HTMLUtils.getTagInfo(hostEditor, cursor);
+			if (!tagInfo.tagName) {
+				break;
 			}
 
+			var tag = tagInfo.tagName;
+			
 			// Get a reference to the DOM element in the iframe.
 			var domCache = DomCache.getCache();
 			var el = domCache.frameDom[tag][domCache.codeDom[tag].indexOf(cursor.line)];
